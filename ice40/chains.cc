@@ -195,6 +195,12 @@ class ChainConstrainer
                                                  [cin_cell, cin_port](const PortRef &usr) {
                                                      return usr.cell == cin_cell && usr.port == cin_port.name;
                                                  }));
+        // Copy BELL from the first cell
+        auto cin_bel = cin_cell->attrs.find(ctx->id("BEL"));
+        if (cin_bel != cin_cell->attrs.end()) {
+            lc->attrs[ctx->id("BEL")] = cin_cell->attrs[ctx->id("BEL")];
+            cin_cell->attrs.erase(ctx->id("BEL"));
+        }
 
         PortRef i1_ref;
         i1_ref.cell = lc.get();
@@ -286,8 +292,10 @@ class ChainConstrainer
         }
         // Actual chain placement
         for (auto &chain : all_chains) {
-            if (ctx->verbose)
-                log_info("Placing carry chain starting at '%s'\n", chain.cells.front()->name.c_str(ctx));
+            if (ctx->verbose) {
+                log_info("Placing carry chain starting at '%s' (start %s)\n", chain.cells.front()->name.c_str(ctx),
+                         chain.cells.at(1)->name.c_str(ctx));
+            }
 
             // Place carry chain
             chain.cells.at(0)->constr_abs_z = true;

@@ -382,12 +382,41 @@ class HeAPPlacer
                               cell->name.c_str(ctx), loc_name.c_str(), bound_cell->name.c_str(ctx));
                 }
 
+                log_info("BZN binding bell '%s' to %s\n", cell->name.c_str(ctx), ctx->getBelName(bel).c_str(ctx));
+
                 ctx->bindBel(bel, cell, STRENGTH_USER);
+
+                propagate_constraints_to_chain(cell, cell);
+
                 placed_cells++;
             }
         }
         log_info("Placed %d cells based on constraints.\n", int(placed_cells));
         ctx->yield();
+    }
+
+    void propagate_constraints_to_chain(CellInfo *cell, CellInfo *root)
+    {
+        Loc ploc = ctx->getBelLocation(cell->bel);
+        for (auto child : cell->constr_children) {
+            Loc cloc = ploc;
+
+            if (child->constr_x != child->UNCONSTR)
+                cloc.x += child->constr_x;
+            if (child->constr_y != child->UNCONSTR)
+                cloc.y += child->constr_y;
+            if (child->constr_z != child->UNCONSTR)
+                cloc.z = child->constr_abs_z ? child->constr_z : (ploc.z + child->constr_z);
+
+            BelId bel = ctx->getBelByLocation(cloc);
+
+            log_info("BZN binding %s to bell '%s'\n", child->name.c_str(ctx), ctx->getBelName(bel).c_str(ctx));
+
+            ctx->bindBel(bel, child, STRENGTH_USER);
+
+            if (!child->constr_children.empty())
+                update_chain(child, root);
+        }
     }
 
     // Construct the fast_bels, nearest_row_with_bel and nearest_col_with_bel
@@ -515,11 +544,17 @@ class HeAPPlacer
         for (auto cell : sorted(ctx->cells)) {
             CellInfo *ci = cell.second;
             if (ci->bel != BelId()) {
+
+                log_info("BZN Already mapped to bel '%s'\n", ci->name.c_str(ctx));
+
                 Loc loc = ctx->getBelLocation(ci->bel);
                 cell_locs[cell.first].x = loc.x;
                 cell_locs[cell.first].y = loc.y;
                 cell_locs[cell.first].locked = true;
                 cell_locs[cell.first].global = ctx->getBelGlobalBuf(ci->bel);
+
+                update_chain(ci, ci);
+
             } else if (ci->constr_parent == nullptr) {
                 bool placed = false;
                 while (!placed) {
@@ -533,6 +568,8 @@ class HeAPPlacer
                     cell_locs[cell.first].y = loc.y;
                     cell_locs[cell.first].locked = false;
                     cell_locs[cell.first].global = ctx->getBelGlobalBuf(bel);
+
+                    log_info("BZN Queueing for placement, %d,%d '%s'\n", loc.x, loc.y, ci->name.c_str(ctx));
                     // FIXME
                     if (has_connectivity(cell.second) && !cfg.ioBufTypes.count(ci->type)) {
                         place_cells.push_back(ci);
@@ -1189,6 +1226,8 @@ class HeAPPlacer
             }
             for (auto &cell : p->cell_locs) {
                 if (ctx->cells.at(cell.first)->type != beltype)
+                    continue;
+                if (ctx->cells.at(cell.first)->belStrength > STRENGTH_STRONG)
                     continue;
                 // Transfer chain extents to the actual chaines structure
                 ChainExtent *ce = nullptr;
